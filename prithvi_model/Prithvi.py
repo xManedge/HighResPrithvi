@@ -48,6 +48,9 @@ class Prithvi_EO(nn.Module):
 
         self.segmentation_map_outconv = outConv(in_channel=FPN_out_channels, out_channel=self.num_classes)
 
+        for param in self.pretrainedmodel.parameters():
+            param.requires_grad = False
+
     def parse_hidden_output(self, output):
         output = output[:, 1:, :]
         B, patch_dim, C = output.shape
@@ -94,3 +97,9 @@ class Prithvi_EO(nn.Module):
         output = self.segmentation_map_outconv(output)
 
         return output
+
+    def StartFineTuning(self, blocks_to_unfreeze=1):
+        total = len(self.pretrainedmodel.blocks)
+        for idx in range(total - blocks_to_unfreeze, total):
+            for p in self.pretrainedmodel.blocks[idx].parameters():
+                p.requires_grad = True
