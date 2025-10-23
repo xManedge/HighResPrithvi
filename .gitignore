@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pkl
+*.log
+.env
+.venv/
+prithvi_venv/
+Dataset/
+outputs/
+.idea/
