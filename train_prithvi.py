@@ -95,7 +95,7 @@ def train_model(model, image_paths, label_path, device, batch_size,
                 tile=dataset_params['tile'],  # (224,224) tile extraction
                 stride=dataset_params['stride'],  # controls tile overlap
                 ignore_index=dataset_params['ignore_index'],
-                verbose=True,
+                verbose=dataset_params['verbose'],
             )
 
             """
@@ -110,7 +110,7 @@ def train_model(model, image_paths, label_path, device, batch_size,
                 [TRAIN_SPLIT, len(dataset) - TRAIN_SPLIT]
             )
 
-            print(f"Currently starting tile {os.path.basename(label_path)}")
+            print(f"Currently starting tile {os.path.dirname(image_path)}")
 
             """
             ---------------------------------------------------------------
@@ -185,7 +185,7 @@ image_paths = [
 label_paths = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
 
 # ==== Training parameters ====
-batch_size = 32
+batch_size = 8
 device = 'auto'
 epochs = 10
 lr = 1e-4
@@ -194,7 +194,7 @@ dice_weight = 0.5
 focal_weight = 1.0
 focal_gamma = 2.0
 class_weights = None
-
+verbose = False
 # ==== Dataset parameters ====
 tile_size = 224
 stride = 224
@@ -259,6 +259,7 @@ dataset_params = {
     'tile': tile_size,
     'stride': stride,
     'ignore_index': ignore_index,
+    'verbose': verbose,
 }
 
 """
@@ -290,8 +291,8 @@ model = Prithvi_EO(
     fpn_blocks=[3, 6, 9, 12],  # Transformer layers used for skip features
     scale_factors=[1, 2, 3, 6],  # Pooling scales
     embed_dim=768,  # Embedding size (ViT-Small)
-    out_channels_feature_map=128,
-    FPN_out_channels=128,
+    out_channels_feature_map=256,
+    FPN_out_channels=256,
     upsampling_scale_list=[4, 2, 1, 0.5],
     u_height=56,
     u_width=56,
