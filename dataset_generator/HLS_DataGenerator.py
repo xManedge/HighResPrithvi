@@ -26,7 +26,7 @@ class HLSDataset(Dataset):
         self.label_loc = label_loc
         self.tile = tile
         self.stride = stride
-        self.ignore_index = 255
+        self.ignore_index = ignore_index
         self.verbose = verbose
         
         self._setup_aligned_grid()

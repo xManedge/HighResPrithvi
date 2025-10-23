@@ -11,30 +11,38 @@ from dataset_generator import HLSDataset
 from torchsummary import summary
 
 import json
+os.environ['TORCH_DYNAMO_DISABLE_DOCSTRING_CHECKS'] = '1'
 
-def train_model(model, image_paths, label_paths, device, batch_size,
+import torch.nn as nn
+from torchsummary import summary
+import numpy as np
+from terratorch.registry import BACKBONE_REGISTRY
+
+from modules import Prithvi_EO
+
+def train_model(model, image_paths, label_path, device, batch_size,
                 epochs, save_dir, train_params, dataset_params):
     print("Training...")
 
     train_metrics_per_city = []
     val_metrics_per_city = []
 
-    models_per_epoch = []
 
 
+    # summary of the model
+    print(summary(model, input_size = (6,1,224,224)))
 
-    #print(summary(model))
-
-    shuffled_indexes = np.arange(len(image_paths))
-    np.random.shuffle(shuffled_indexes)
 
     # Main training loop: iterate through specified number of epochs
     for epoch in range(epochs):
         print(f"Starting epoch {epoch + 1}/{epochs}")
 
+        shuffled_indexes = np.arange(len(image_paths))
+        np.random.shuffle(shuffled_indexes)
+
         # Train on each city in the randomized order
         for idx in shuffled_indexes:
-            image_path, label_path = image_paths[idx], label_paths[idx]
+            image_path = image_paths[idx]
 
             # Create dataset for current city with user-specified parameters
             # Sentinel2Dataset should handle loading and preprocessing of satellite imagery
@@ -44,6 +52,7 @@ def train_model(model, image_paths, label_paths, device, batch_size,
                 tile=dataset_params['tile'],  # Tile size for cropping
                 stride=dataset_params['stride'],  # Sliding window stride
                 ignore_index=dataset_params['ignore_index'],  # Ignore value in labels
+                verbose= True,
             )
 
             # Split dataset into training and validation sets (80/20 split)
@@ -87,17 +96,21 @@ def train_model(model, image_paths, label_paths, device, batch_size,
     )
 
 
-# === CLI CONFIGURATION EQUIVALENT IN PYTHON ===
 
-# ==== Required Inputs (change these!) ====
-image_paths = "./Dataset/HLS-2/Orlando/HLS.S30.T17RMM.2024098T155819.v2.0.B02.tif"  # TODO: Provide list of Sentinel-2 B02 image file paths (.jp2)
-label_paths = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"  # TODO: Provide list of corresponding label file paths (.tif)
+
+# ==== Required Inputs ====
+image_paths = ["./Dataset/HLS-2/Orlando/HLS.S30.T17RMM.2024098T155819.v2.0.B02.tif", # orlando
+               "./Dataset/HLS-2/Seattle/HLS.S30.T10TET.2025159T190909.v2.0.B02.tif", # seattle
+               "./Dataset/HLS-2/Los Angeles/HLS.S30.T11SLT.2024128T182921.v2.0.B02.tif", # Los Angeles
+               "./Dataset/HLS-2/Chicago/HLS.S30.T16TDM.2025261T164701.v2.0.B02.tif", # chicago
+               ]
+label_paths = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"  # United states of america
 
 # ==== Training parameters ====
 batch_size = 32  # Default: 32
 device = 'auto'  # Options: 'auto', 'cuda', 'cpu', 'xpu'
 epochs = 10  # Default: 10
-lr = 7e-5  # Learning rate
+lr = 1e-4  # Learning rate
 ignore_index = 255  # Label value to ignore in loss
 dice_weight = 0.5  # Dice loss weight
 focal_weight = 1.0  # Focal loss weight
@@ -107,20 +120,14 @@ class_weights = None  # TODO: Add class weights if needed, e.g., [1.0, 2.0, 1.5,
 # ==== Dataset parameters ====
 tile_size = 256  # Crop size
 stride = 256  # Sliding window step
-random_crop = True  # True = random crop, False = sliding window
-num_samples = 7000  # Samples per epoch if random crop enabled
-augmentation = False  # Enable data augmentation or not
-aug_params = None  # TODO: Set if using custom aug params, e.g., {"rotate":30, "flip":1}
 
 # ==== Output settings ====
-save_dir = 'models/Unet/Saved_models_and_logs'  # Default output dir
+save_dir = 'models/Prithvi/Saved_models'  # Default output dir
 
 # ==== Example usage in code ====
 print("Training config:")
-print(f"Models: {models}")
 print(f"Epochs: {epochs}, Batch Size: {batch_size}, LR: {lr}")
 print(f"Device: {device}")
-print(f"Data Augmentation: {augmentation}, Random Crop: {random_crop}")
 print(f"Save Directory: {save_dir}")
 
 # Setup device
@@ -149,14 +156,26 @@ train_params = {
 dataset_params = {
     'tile': tile_size,
     'stride':stride,
-    'random_crop': random_crop,
-    'num_samples': num_samples,
     'ignore_index': ignore_index,
-    'augmentation': augmentation,
-    'aug_params': aug_params
 }
 
-model = None # TODO: load model here
+
+pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_300_tl", pretrained=True) # load prithvi pretrained model
+
+model = Prithvi_EO(
+    pretrained_model=pretrained_model,
+    num_classes=4,
+    fpn_blocks=[3, 6, 9, 12],
+    scale_factors=[1, 2, 3, 6],
+    embed_dim=768,
+    out_channels_feature_map=256,
+    FPN_out_channels=256,
+    upsampling_scale_list=[4, 2, 1, 0.5],
+    u_height = 56,
+    u_width = 56,
+)
+
+
 
 
 train_model(model, image_paths, label_paths, device, batch_size, epochs, save_dir, train_params, dataset_params)
