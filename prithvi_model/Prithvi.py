@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from modules import (
+from prithvi_model.modules import (
     DoubleConv,
     outConv,
     PyramidPooling,
@@ -62,34 +62,31 @@ class Prithvi_EO(nn.Module):
     # TODO mby complete this function
 
     def forward(self, x):
-        enc_output, _, _ = self.pretrainedmodel(x)
+        enc_output = self.pretrainedmodel(x)
         # parse and change view
 
-        hidden_output_3 = self.parse_hidden_output(enc_output[self.fpn_blocks[0] - 1])
+        hidden_output_3 = self.parse_hidden_output(enc_output[self.fpn_blocks[0] - 1]) # block 3
 
 
-        hidden_output_6 = self.parse_hidden_output(enc_output[self.fpn_blocks[1] - 1])
+        hidden_output_6 = self.parse_hidden_output(enc_output[self.fpn_blocks[1] - 1]) # block 6
 
-        hidden_output_9 = self.parse_hidden_output(enc_output[self.fpn_blocks[2] - 1])
+        hidden_output_9 = self.parse_hidden_output(enc_output[self.fpn_blocks[2] - 1]) # block 9
 
-        final_enc_output = self.parse_hidden_output(enc_output[self.fpn_blocks[3] - 1])
+        final_enc_output = self.parse_hidden_output(enc_output[self.fpn_blocks[3] - 1]) # block 12 - final block
         final_enc_output = F.interpolate(final_enc_output, scale_factor=self.upsampling_scales[3], align_corners=True, mode='bilinear')
 
         U4 = self.pyramid_pooling_layer(final_enc_output) # 7 7 256
-
         U3 = self.FPN_block(hidden_output_9, U4, self.upsampling_scales[2])
 
-
         U2 = self.FPN_block(hidden_output_6, U3, self.upsampling_scales[1])  # 28 28 256
-
         U1 = self.FPN_block(hidden_output_3, U2, self.upsampling_scales[0])  # 56 56 256
-
         # upsample all the Us to the same size which is 56,56
         U2 = self.upsample(U2) # 256 56 56
         U3 = self.upsample(U3) # 256 56 56
         U4 = self.upsample(U4) # 256 56 56
 
         # concat all these Us
+
         output = torch.cat((U1, U2, U3, U4), dim=1)  # B 1024 56 56
         output = self.FPN_upsample(output)  # B 1024 224 224
         output = self.FPN_conv(output)  # B 256 224 224

@@ -347,7 +347,7 @@ def main():
     print("=" * 80)
     
     # Create dataset
-    dataset = train_datagenerator(
+    dataset = HLSDataset(
         image_loc=image_loc,
         label_loc=label_loc,
         tile=224,

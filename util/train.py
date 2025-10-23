@@ -11,7 +11,7 @@ Training + validation loop for a U-PerNet-style Prithvi.
 - Dataloaders:
     * Train loader shuffles; Validation loader does not shuffle
 - Returns:
-    * model (with updated weights)
+    * prithvi_model (with updated weights)
     * train_loss_list (per-epoch average training loss)
     * train_accuracies_list (per-epoch training accuracy)
     * val_loss_list (per-epoch average validation loss)
@@ -30,18 +30,18 @@ import os, pickle
 
 def save_epoch_model(model, save_dir, epoch):
     """
-    Save model state dict after each epoch with epoch suffix.
+    Save prithvi_model state dict after each epoch with epoch suffix.
 
-    This function saves the model's state dictionary with an epoch identifier
-    to allow tracking of model progress throughout training. Each epoch creates
+    This function saves the prithvi_model's state dictionary with an epoch identifier
+    to allow tracking of prithvi_model progress throughout training. Each epoch creates
     a separate checkpoint file.
 
     Args:
-        model (torch.nn.Module): The PyTorch model to save
-        model_name (str): Name of the model architecture being trained.
+        model (torch.nn.Module): The PyTorch prithvi_model to save
+        model_name (str): Name of the prithvi_model architecture being trained.
                          Must be one of: 'Base UNet', 'Attention Block UNet',
                          'Hybrid UNet', 'Self Attention UNet'
-        save_dir (str): Directory path where the model checkpoint will be saved
+        save_dir (str): Directory path where the prithvi_model checkpoint will be saved
         epoch (int): Current epoch number (0-indexed)
 
     Returns:
@@ -61,14 +61,14 @@ def save_epoch_model(model, save_dir, epoch):
 
     epoch_model_file = f"Prithvi_300M_ep{epoch + 1}.pt"
 
-    # Save model state dict with epoch suffix
+    # Save prithvi_model state dict with epoch suffix
     torch.save(model.state_dict(), os.path.join(save_dir, epoch_model_file))
-    print(f"Saved epoch {epoch + 1} model: {epoch_model_file}")
+    print(f"Saved epoch {epoch + 1} prithvi_model: {epoch_model_file}")
 
 
 def save_final_model_and_metrics(model, save_dir, train_metrics_per_city, val_metrics_per_city):
     """
-    Save final model, configuration file, and all training metrics at the end of training.
+    Save final prithvi_model, configuration file, and all training metrics at the end of training.
 
     This function performs the final save operation after all epochs are complete.
     It saves three types of files:
@@ -77,8 +77,8 @@ def save_final_model_and_metrics(model, save_dir, train_metrics_per_city, val_me
     3. Training and validation metrics as pickle files (.pkl files)
 
     Args:
-        model (torch.nn.Module): The trained PyTorch model with config_file attribute
-        model_name (str): Name of the model architecture. Must be one of:
+        model (torch.nn.Module): The trained PyTorch prithvi_model with config_file attribute
+        model_name (str): Name of the prithvi_model architecture. Must be one of:
                          'Base UNet', 'Attention Block UNet', 'Hybrid UNet', 'Self Attention UNet'
         save_dir (str): Directory path where all files will be saved
         train_metrics_per_city (list): List of tuples containing (train_loss, train_acc)
@@ -90,31 +90,31 @@ def save_final_model_and_metrics(model, save_dir, train_metrics_per_city, val_me
         None
 
     Side Effects:
-        - Creates model .pt file with final trained weights
-        - Creates config .json file with model configuration parameters
+        - Creates prithvi_model .pt file with final trained weights
+        - Creates config .json file with prithvi_model configuration parameters
         - Creates train metrics .pkl file with training loss/accuracy history
         - Creates validation metrics .pkl file with validation loss/accuracy history
         - Prints confirmation messages for all saved files
 
     Raises:
-        AttributeError: If model does not have config_file attribute
+        AttributeError: If prithvi_model does not have config_file attribute
         OSError: If save_dir is not writable or does not exist
 
     Example Files Created (for 'Base UNet'):
-        - base_unet.pt (model weights)
-        - base_unet_config.json (model configuration)
+        - base_unet.pt (prithvi_model weights)
+        - base_unet_config.json (prithvi_model configuration)
         - train_metrics_unet_model_BASE.pkl (training metrics)
         - val_metrics_model_BASE.pkl (validation metrics)
     """
     # create directory if it doesn't exist
     os.makedirs(save_dir, exist_ok=True)
 
-    # Mapping of model names to their respective file naming conventions
+    # Mapping of prithvi_model names to their respective file naming conventions
     # Format: (model_file, train_metrics_file, val_metrics_file)
     model_file, train_file, val_file = 'Pritvi_300M_', 'train_metrics_prithvi.pkl', 'val_metrics_prithvi.pkl'
 
 
-    # Save final model state dictionary containing learned parameters
+    # Save final prithvi_model state dictionary containing learned parameters
     torch.save(model.state_dict(), os.path.join(save_dir, model_file))
 
     # Save training metrics (loss and accuracy per city/tile)
@@ -126,7 +126,7 @@ def save_final_model_and_metrics(model, save_dir, train_metrics_per_city, val_me
         pickle.dump(val_metrics_per_city, f)
 
     # Provide user feedback on successful saves
-    print(f"Saved final model: {model_file}")
+    print(f"Saved final prithvi_model: {model_file}")
     print(f"Saved metrics: {train_file}, {val_file}")
 
 
@@ -147,7 +147,7 @@ def train_one_epoch(
         class_weights: Optional[torch.Tensor] = None,  # optional per-class weights
 ) -> Tuple[nn.Module, list[float], list[float], list[float], list[float]]:
     """
-    Train and validate a segmentation model on the given datasets.
+    Train and validate a segmentation prithvi_model on the given datasets.
 
     Args:
         model (nn.Module): The segmentation network that outputs logits of shape [B, C, H, W].
@@ -168,7 +168,7 @@ def train_one_epoch(
 
     Returns:
         Tuple:
-            - model (nn.Module): The trained model instance.
+            - prithvi_model (nn.Module): The trained prithvi_model instance.
             - train_loss_list (List[float]): Per-epoch average training loss.
             - train_accuracies_list (List[float]): Per-epoch training accuracy.
             - val_loss_list (List[float]): Per-epoch average validation loss.
@@ -181,14 +181,14 @@ def train_one_epoch(
     elif isinstance(device, str):
         device = torch.device(device)
 
-    model = model.to(device=device)  # Move model to the chosen device
+    model = model.to(device=device)  # Move prithvi_model to the chosen device
 
     # --------------------------- DATALOADERS ---------------------------------
     train_loader = DataLoader(dataset=train_ds, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(dataset=val_ds, batch_size=batch_size, shuffle=False)
 
     # --------------------------- LOSS FUNCTIONS ------------------------------
-    # DiceLoss: penalizes overlap mismatch (from_logits=True since model outputs logits)
+    # DiceLoss: penalizes overlap mismatch (from_logits=True since prithvi_model outputs logits)
     # Make sure class_weights is moved to correct device/dtype before usage
     cw = class_weights.to(device=device, dtype=torch.float32) if class_weights is not None else None
 

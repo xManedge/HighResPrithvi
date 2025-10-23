@@ -1,24 +1,19 @@
-import argparse
+
 import torch
-import numpy as np
-import pickle
 
 import os
 
 from util import train_one_epoch, save_epoch_model, save_final_model_and_metrics
 from dataset_generator import HLSDataset
 
-from torchsummary import summary
 
-import json
 os.environ['TORCH_DYNAMO_DISABLE_DOCSTRING_CHECKS'] = '1'
 
-import torch.nn as nn
 from torchsummary import summary
 import numpy as np
 from terratorch.registry import BACKBONE_REGISTRY
 
-from modules import Prithvi_EO
+from prithvi_model import Prithvi_EO
 
 def train_model(model, image_paths, label_path, device, batch_size,
                 epochs, save_dir, train_params, dataset_params):
@@ -29,7 +24,7 @@ def train_model(model, image_paths, label_path, device, batch_size,
 
 
 
-    # summary of the model
+    # summary of the prithvi_model
     print(summary(model, input_size = (6,1,224,224)))
 
 
@@ -64,7 +59,7 @@ def train_model(model, image_paths, label_path, device, batch_size,
 
             print(f"Currently starting tile {os.path.basename(label_path)}")
 
-            # Train model on current city's data for one epoch
+            # Train prithvi_model on current city's data for one epoch
             # train_unet should be defined elsewhere and handle the actual training loop
             model, train_loss, train_acc, val_loss, val_acc = train_one_epoch(
                 model=model,  # Model to train
@@ -86,10 +81,10 @@ def train_model(model, image_paths, label_path, device, batch_size,
             train_metrics_per_city.append((train_loss, train_acc))
             val_metrics_per_city.append((val_loss, val_acc))
 
-        # Save model checkpoint after completing all cities for this epoch
+        # Save prithvi_model checkpoint after completing all cities for this epoch
         save_epoch_model(model, save_dir, epoch)
 
-    # Save final model, configuration, and all collected metrics
+    # Save final prithvi_model, configuration, and all collected metrics
     save_final_model_and_metrics(
         model, save_dir,
         train_metrics_per_city, val_metrics_per_city
@@ -118,11 +113,11 @@ focal_gamma = 2.0  # Focal loss gamma
 class_weights = None  # TODO: Add class weights if needed, e.g., [1.0, 2.0, 1.5, 0.8]
 
 # ==== Dataset parameters ====
-tile_size = 256  # Crop size
-stride = 256  # Sliding window step
+tile_size = 224  # Crop size
+stride = 224  # Sliding window step
 
 # ==== Output settings ====
-save_dir = 'models/Prithvi/Saved_models'  # Default output dir
+save_dir = 'prithvi_model/saved_models'  # Default output dir
 
 # ==== Example usage in code ====
 print("Training config:")
@@ -160,14 +155,14 @@ dataset_params = {
 }
 
 
-pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_300_tl", pretrained=True) # load prithvi pretrained model
+pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_300_tl", pretrained=True) # load prithvi pretrained prithvi_model
 
 model = Prithvi_EO(
     pretrained_model=pretrained_model,
     num_classes=4,
-    fpn_blocks=[3, 6, 9, 12],
+    fpn_blocks=[6, 12, 18, 24],
     scale_factors=[1, 2, 3, 6],
-    embed_dim=768,
+    embed_dim=1024,
     out_channels_feature_map=256,
     FPN_out_channels=256,
     upsampling_scale_list=[4, 2, 1, 0.5],

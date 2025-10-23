@@ -12,8 +12,8 @@ from sklearn.metrics import confusion_matrix, classification_report
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Placeholder for Prithvi model import
-# TODO: Replace with actual Prithvi model import
+# Placeholder for Prithvi prithvi_model import
+# TODO: Replace with actual Prithvi prithvi_model import
 # from models.prithvi import PrithviModel  # or whatever the actual import is
 from dataset_generator import HLSDataset
 
@@ -441,7 +441,7 @@ def save_georeferenced_geotiff(array, output_path, transform, crs,
 
 def main():
     """
-    Main function for Prithvi model inference with comprehensive metrics tracking.
+    Main function for Prithvi prithvi_model inference with comprehensive metrics tracking.
     """
 
     # TODO: Update these paths for your HLS dataset
@@ -463,21 +463,21 @@ def main():
     print(f"Processing: {model_name}")
     print(f"{'=' * 50}")
 
-    # TODO: Load your Prithvi model here
+    # TODO: Load your Prithvi prithvi_model here
     # Example placeholder:
-    # model = PrithviModel(
+    # prithvi_model = PrithviModel(
     #     img_channels=img_channels,
     #     n_classes=n_classes,
     #     # ... other Prithvi-specific parameters
     # )
-    # model.load_state_dict(
+    # prithvi_model.load_state_dict(
     #     torch.load("models/prithvi/saved_model.pt",
     #              map_location=device)
     # )
 
     # For now, using placeholder
-    print("WARNING: Using placeholder model. Replace with actual Prithvi model loading!")
-    model = None  # Replace with actual model
+    print("WARNING: Using placeholder prithvi_model. Replace with actual Prithvi prithvi_model loading!")
+    model = None  # Replace with actual prithvi_model
 
     if model is not None:
         model.eval()
@@ -511,7 +511,7 @@ def main():
                         if class_name in report:
                             print(f"  {class_name}: {report[class_name]['f1-score']:.4f}")
     else:
-        print("ERROR: Model is None. Please implement proper model loading.")
+        print("ERROR: Model is None. Please implement proper prithvi_model loading.")
 
 
 if __name__ == "__main__":
@@ -522,8 +522,8 @@ if __name__ == "__main__":
 # ============================================================================
 
 # 1. ADAPTED FOR SINGLE PRITHVI MODEL:
-#    - Removed multi-model loop
-#    - Simplified to single model inference
+#    - Removed multi-prithvi_model loop
+#    - Simplified to single prithvi_model inference
 #    - Updated references from Sentinel-2 to HLS
 
 # 2. HLS DATASET COMPATIBILITY:
@@ -553,8 +553,8 @@ if __name__ == "__main__":
 #    - raw_predictions.pkl
 
 # 6. TODO ITEMS:
-#    - Replace model import placeholder with actual Prithvi import
-#    - Update model loading code in main()
+#    - Replace prithvi_model import placeholder with actual Prithvi import
+#    - Update prithvi_model loading code in main()
 #    - Update image_path and label_path for your HLS data
 #    - Adjust img_channels if different from 6
 #    - Verify class_names match your dataset
