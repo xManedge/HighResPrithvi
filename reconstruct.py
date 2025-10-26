@@ -12,9 +12,11 @@ from sklearn.metrics import confusion_matrix, classification_report
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Placeholder for Prithvi prithvi_model import
-# TODO: Replace with actual Prithvi prithvi_model import
-# from models.prithvi import PrithviModel  # or whatever the actual import is
+os.environ['TORCH_DYNAMO_DISABLE_DOCSTRING_CHECKS'] = '1'
+
+from terratorch.registry import BACKBONE_REGISTRY
+from prithvi_model import Prithvi_EO
+
 from dataset_generator import HLSDataset
 
 
@@ -270,7 +272,7 @@ def predict_with_reconstruction_and_metrics(model, image_link, device=None, batc
 
     # CRITICAL: Must use deterministic mode for reconstruction
     has_labels = labels_path is not None
-    test_set = HLSDataset(image_link, labels_path, random_crop=False)
+    test_set = HLSDataset(image_link, labels_path, tile=224, stride=224, random_crop=False, ignore_index=255)
 
     test_loader = DataLoader(test_set, shuffle=False, batch_size=batch_size)
 
@@ -373,7 +375,7 @@ def reconstruct_and_save_geotiff(patch_predictions, dataset, model_name, output_
         # Get the original row,col coordinates for this patch
         row, col = dataset.windows[patch_idx]
 
-        # Get patch dimensions (usually 256x256, but could be smaller at edges)
+        # Get patch dimensions (usually 224x224, but could be smaller at edges)
         patch_h, patch_w = prediction.shape
 
         # Calculate where this patch goes in the full image
@@ -441,120 +443,162 @@ def save_georeferenced_geotiff(array, output_path, transform, crs,
 
 def main():
     """
-    Main function for Prithvi prithvi_model inference with comprehensive metrics tracking.
+    Main function for multi-city Prithvi model inference with comprehensive metrics tracking.
     """
 
-    # TODO: Update these paths for your HLS dataset
-    label_path = "dataset/hls_dataset/labels/Orlando.tif"  # Update this path!
-    image_path = "dataset/hls_dataset/images/Orlando_HLS.tif"  # Update this path!
+    # Image paths for all 5 cities
+    image_paths = [
+        "./Dataset/HLS-2/Orlando/HLS.S30.T17RMM.2024098T155819.v2.0.B02.tif",
+        "./Dataset/HLS-2/Seattle/HLS.S30.T10TET.2025159T190909.v2.0.B02.tif",
+        "./Dataset/HLS-2/Los Angeles/HLS.S30.T11SLT.2024128T182921.v2.0.B02.tif",
+        "./Dataset/HLS-2/Chicago/HLS.S30.T16TDM.2025261T164701.v2.0.B02.tif",
+        "./Dataset/HLS-2/New York City/HLS.S30.T18TWL.2025279T155029.v2.0.B02.tif",
+    ]
+    
+    # Single label file for all cities
+    label_path = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
 
-    batch_size = 4
-    output_dir = 'reconstructed_tiles'
+    # Extract city names from paths
+    city_names = []
+    for path in image_paths:
+        city_name = path.split('/')[2]  # Gets "Orlando", "Seattle", etc.
+        city_names.append(city_name)
+
+    batch_size = 8
+    base_output_dir = 'reconstructed_tiles'
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
 
     # Model parameters
     n_classes = 4
-    img_channels = 6  # Adjust based on your HLS bands
-    class_names = ['water', 'trees', 'buildings', 'crops']  # Update as needed
+    class_names = ['water', 'trees', 'buildings', 'crops']
     model_name = 'prithvi'
 
-    print(f"\n{'=' * 50}")
-    print(f"Processing: {model_name}")
-    print(f"{'=' * 50}")
+    print(f"\n{'=' * 70}")
+    print(f"MULTI-CITY INFERENCE - Prithvi 300M Model")
+    print(f"{'=' * 70}")
+    print(f"Device: {device}")
+    print(f"Cities to process: {len(image_paths)}")
+    print(f"{'=' * 70}\n")
 
-    # TODO: Load your Prithvi prithvi_model here
-    # Example placeholder:
-    # prithvi_model = PrithviModel(
-    #     img_channels=img_channels,
-    #     n_classes=n_classes,
-    #     # ... other Prithvi-specific parameters
-    # )
-    # prithvi_model.load_state_dict(
-    #     torch.load("models/prithvi/saved_model.pt",
-    #              map_location=device)
-    # )
+    """
+    ==============================================================================
+    MODEL INITIALIZATION (Once for all cities)
+    ==============================================================================
+    """
+    print("Loading Prithvi 300M model...")
+    pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_300_tl", pretrained=True)
 
-    # For now, using placeholder
-    print("WARNING: Using placeholder prithvi_model. Replace with actual Prithvi prithvi_model loading!")
-    model = None  # Replace with actual prithvi_model
+    model = Prithvi_EO(
+        pretrained_model=pretrained_model,
+        num_classes=4,
+        fpn_blocks=[6, 12, 18, 24],
+        scale_factors=[1, 2, 3, 6],
+        embed_dim=1024,
+        out_channels_feature_map=256,
+        FPN_out_channels=256,
+        upsampling_scale_list=[4, 2, 1, 0.5],
+        u_height=56,
+        u_width=56,
+    )
+    
+    model = model.to(device)
+    model.eval()
+    print("Model loaded successfully!\n")
 
-    if model is not None:
-        model.eval()
-
-        # Run inference with metrics tracking
-        result = predict_with_reconstruction_and_metrics(
-            model=model,
-            image_link=image_path,
-            device=device,
-            batch_size=batch_size,
-            model_name=model_name,
-            output_dir=output_dir,
-            labels_path=label_path,  # Set to None if no labels
-            class_names=class_names
-        )
-
-        if len(result) == 2:
-            reconstructed_tile, metrics_tracker = result
+    """
+    ==============================================================================
+    PROCESS EACH CITY
+    ==============================================================================
+    """
+    all_city_results = []
+    
+    for idx, (image_path, city_name) in enumerate(zip(image_paths, city_names)):
+        print(f"\n{'=' * 70}")
+        print(f"Processing City {idx + 1}/{len(image_paths)}: {city_name}")
+        print(f"{'=' * 70}")
+        
+        # Create city-specific output directory
+        city_output_dir = os.path.join(base_output_dir, city_name)
+        os.makedirs(city_output_dir, exist_ok=True)
+        
+        try:
+            # Run inference for this city
+            reconstructed_tile, metrics_tracker = predict_with_reconstruction_and_metrics(
+                model=model,
+                image_link=image_path,
+                device=device,
+                batch_size=batch_size,
+                model_name=model_name,
+                output_dir=city_output_dir,
+                labels_path=label_path,
+                class_names=class_names
+            )
 
             if metrics_tracker is not None:
-                print(f"\n{'=' * 50}")
-                print("Results Summary:")
-                print(f"{'=' * 50}")
-
                 report = metrics_tracker.get_classification_report()
                 if report:
-                    print(f"Overall Accuracy: {report['accuracy']:.4f}")
-                    print(f"Macro F1-Score: {report['macro avg']['f1-score']:.4f}")
-                    print("\nPer-class F1-scores:")
+                    print(f"\n{city_name} Results:")
+                    print(f"  Overall Accuracy: {report['accuracy']:.4f}")
+                    print(f"  Macro F1-Score: {report['macro avg']['f1-score']:.4f}")
+                    print(f"  Mean IoU: {report['macro avg']['recall']:.4f}")  # Approximation
+                    
+                    # Store results for summary
+                    city_result = {
+                        'city': city_name,
+                        'accuracy': report['accuracy'],
+                        'macro_f1': report['macro avg']['f1-score'],
+                        'macro_precision': report['macro avg']['precision'],
+                        'macro_recall': report['macro avg']['recall'],
+                    }
+                    
+                    # Add per-class F1 scores
                     for class_name in class_names:
                         if class_name in report:
-                            print(f"  {class_name}: {report[class_name]['f1-score']:.4f}")
-    else:
-        print("ERROR: Model is None. Please implement proper prithvi_model loading.")
+                            city_result[f'{class_name}_f1'] = report[class_name]['f1-score']
+                    
+                    all_city_results.append(city_result)
+                    
+            print(f"✓ {city_name} processing complete!")
+            print(f"  Results saved to: {city_output_dir}")
+            
+        except Exception as e:
+            print(f"✗ ERROR processing {city_name}: {str(e)}")
+            continue
+
+    """
+    ==============================================================================
+    SAVE AGGREGATED RESULTS
+    ==============================================================================
+    """
+    if all_city_results:
+        print(f"\n{'=' * 70}")
+        print("AGGREGATED RESULTS ACROSS ALL CITIES")
+        print(f"{'=' * 70}\n")
+        
+        # Save summary CSV
+        summary_df = pd.DataFrame(all_city_results)
+        summary_path = os.path.join(base_output_dir, 'all_cities_summary.csv')
+        summary_df.to_csv(summary_path, index=False)
+        print(f"Summary saved to: {summary_path}")
+        
+        # Print summary table
+        print("\nPer-City Performance:")
+        print(summary_df.to_string(index=False))
+        
+        # Calculate and print overall averages
+        print(f"\n{'=' * 70}")
+        print("OVERALL AVERAGES:")
+        print(f"{'=' * 70}")
+        print(f"Mean Accuracy: {summary_df['accuracy'].mean():.4f} ± {summary_df['accuracy'].std():.4f}")
+        print(f"Mean Macro F1: {summary_df['macro_f1'].mean():.4f} ± {summary_df['macro_f1'].std():.4f}")
+        print(f"Mean Precision: {summary_df['macro_precision'].mean():.4f} ± {summary_df['macro_precision'].std():.4f}")
+        print(f"Mean Recall: {summary_df['macro_recall'].mean():.4f} ± {summary_df['macro_recall'].std():.4f}")
+        
+        print(f"\n{'=' * 70}")
+        print("✓ ALL CITIES PROCESSED SUCCESSFULLY!")
+        print(f"{'=' * 70}\n")
 
 
 if __name__ == "__main__":
     main()
-
-# ============================================================================
-# WHAT THIS VERSION PROVIDES:
-# ============================================================================
-
-# 1. ADAPTED FOR SINGLE PRITHVI MODEL:
-#    - Removed multi-prithvi_model loop
-#    - Simplified to single prithvi_model inference
-#    - Updated references from Sentinel-2 to HLS
-
-# 2. HLS DATASET COMPATIBILITY:
-#    - Uses hls_shape, hls_transform, hls_crs
-#    - Single HLSDataset for both labeled and unlabeled data
-#    - Handles labels_path=None for inference-only mode
-
-# 3. COMPREHENSIVE METRICS (unchanged):
-#    - Confusion matrix (normalized and raw counts)
-#    - Per-class precision, recall, F1-score
-#    - Overall accuracy and macro averages
-#    - Patch-level detailed metrics
-
-# 4. MULTIPLE OUTPUT FORMATS (unchanged):
-#    - CSV files for analysis
-#    - JSON for programmatic access
-#    - PNG plots for visualization
-#    - Pickle files for raw data
-#    - Human-readable summary reports
-
-# 5. SAVES TO 'prithvi_results' DIRECTORY:
-#    - confusion_matrix.csv
-#    - classification_report.json & .csv
-#    - patch_level_metrics.csv
-#    - confusion_matrix plots (.png)
-#    - summary_report.txt
-#    - raw_predictions.pkl
-
-# 6. TODO ITEMS:
-#    - Replace prithvi_model import placeholder with actual Prithvi import
-#    - Update prithvi_model loading code in main()
-#    - Update image_path and label_path for your HLS data
-#    - Adjust img_channels if different from 6
-#    - Verify class_names match your dataset
