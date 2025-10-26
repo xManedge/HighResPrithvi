@@ -502,9 +502,20 @@ def main():
         u_width=56,
     )
     
+    # Load trained weights
+    model_weights_path = "./prithvi_model/saved_models/Pritvi_300M.pt"
+    print(f"Loading trained weights from: {model_weights_path}")
+    
+    if os.path.exists(model_weights_path):
+        model.load_state_dict(torch.load(model_weights_path, map_location=device))
+        print("Trained weights loaded successfully!")
+    else:
+        print(f"WARNING: Model weights not found at {model_weights_path}")
+        print("  Using randomly initialized weights (for testing only)")
+    
     model = model.to(device)
     model.eval()
-    print("Model loaded successfully!\n")
+    print("Model ready for inference!\n")
 
     """
     ==============================================================================
@@ -559,11 +570,11 @@ def main():
                     
                     all_city_results.append(city_result)
                     
-            print(f"✓ {city_name} processing complete!")
+            print(f"{city_name} processing complete!")
             print(f"  Results saved to: {city_output_dir}")
             
         except Exception as e:
-            print(f"✗ ERROR processing {city_name}: {str(e)}")
+            print(f"ERROR processing {city_name}: {str(e)}")
             continue
 
     """
@@ -596,7 +607,7 @@ def main():
         print(f"Mean Recall: {summary_df['macro_recall'].mean():.4f} ± {summary_df['macro_recall'].std():.4f}")
         
         print(f"\n{'=' * 70}")
-        print("✓ ALL CITIES PROCESSED SUCCESSFULLY!")
+        print("ALL CITIES PROCESSED SUCCESSFULLY!")
         print(f"{'=' * 70}\n")
 
 
