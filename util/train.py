@@ -22,7 +22,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from torchmetrics.classification import MulticlassAccuracy
+from torchmetrics.classification import MulticlassAccuracy, MulticlassJaccardIndex, MulticlassConfusionMatrix
+from torchmetrics.classification import MulticlassPrecision, MulticlassRecall, MulticlassF1Score
 from kornia.losses import DiceLoss, FocalLoss
 from typing import Optional, Tuple
 import os, pickle
@@ -30,17 +31,14 @@ import os, pickle
 
 def save_epoch_model(model, save_dir, epoch):
     """
-    Save prithvi_model state dict after each epoch with epoch suffix.
+    Save prithvi_model state dict every 3rd epoch with epoch suffix.
 
     This function saves the prithvi_model's state dictionary with an epoch identifier
-    to allow tracking of prithvi_model progress throughout training. Each epoch creates
-    a separate checkpoint file.
+    to allow tracking of prithvi_model progress throughout training. Saves only
+    every 3rd epoch to conserve disk space.
 
     Args:
         model (torch.nn.Module): The PyTorch prithvi_model to save
-        model_name (str): Name of the prithvi_model architecture being trained.
-                         Must be one of: 'Base UNet', 'Attention Block UNet',
-                         'Hybrid UNet', 'Self Attention UNet'
         save_dir (str): Directory path where the prithvi_model checkpoint will be saved
         epoch (int): Current epoch number (0-indexed)
 
@@ -52,9 +50,13 @@ def save_epoch_model(model, save_dir, epoch):
         - Prints confirmation message of successful save
 
     Example:
-        For epoch=0 and model_name='Base UNet':
-        Creates file: 'base_unet_ep1.pt'
+        For epoch=2 (3rd epoch):
+        Creates file: 'Prithvi_300M_ep3.pt'
     """
+
+    # Only save every 3rd epoch to save disk space
+    if (epoch + 1) % 3 != 0:
+        return
 
     # create dir if path doesnt exist
     os.makedirs(save_dir, exist_ok=True)
@@ -111,7 +113,7 @@ def save_final_model_and_metrics(model, save_dir, train_metrics_per_city, val_me
 
     # Mapping of prithvi_model names to their respective file naming conventions
     # Format: (model_file, train_metrics_file, val_metrics_file)
-    model_file, train_file, val_file = 'Pritvi_300M_', 'train_metrics_prithvi.pkl', 'val_metrics_prithvi.pkl'
+    model_file, train_file, val_file = 'Pritvi_300M_.pt', 'train_metrics_prithvi.pkl', 'val_metrics_prithvi.pkl'
 
 
     # Save final prithvi_model state dictionary containing learned parameters
@@ -181,7 +183,11 @@ def train_one_epoch(
     elif isinstance(device, str):
         device = torch.device(device)
 
-    model = model.to(device=device)  # Move prithvi_model to the chosen device
+    # Move model to device
+    # NOTE: DataParallel disabled due to nested pretrained model architecture issues
+    # The terratorch pretrained backbone doesn't play well with DataParallel
+    model = model.to(device=device)
+    print(f"Using device: {device}")
 
     # --------------------------- DATALOADERS ---------------------------------
     train_loader = DataLoader(dataset=train_ds, batch_size=batch_size, shuffle=True)
@@ -211,9 +217,16 @@ def train_one_epoch(
 
     # Optimize with Intel XPU if available
 
-    # --------------------------- METRIC --------------------------------------
-    # Accuracy metric (ignores same index as loss). Kept on CPU for consistency.
+    # --------------------------- METRICS -------------------------------------
+    # All metrics on CPU for consistency
     accuracy = MulticlassAccuracy(num_classes=num_classes, ignore_index=ignore_index).to("cpu")
+    iou_metric = MulticlassJaccardIndex(num_classes=num_classes, ignore_index=ignore_index, average=None).to("cpu")
+    miou_metric = MulticlassJaccardIndex(num_classes=num_classes, ignore_index=ignore_index, average='macro').to("cpu")
+    precision_metric = MulticlassPrecision(num_classes=num_classes, ignore_index=ignore_index, average=None).to("cpu")
+    recall_metric = MulticlassRecall(num_classes=num_classes, ignore_index=ignore_index, average=None).to("cpu")
+    f1_metric = MulticlassF1Score(num_classes=num_classes, ignore_index=ignore_index, average=None).to("cpu")  # Per-class Dice
+    mean_f1_metric = MulticlassF1Score(num_classes=num_classes, ignore_index=ignore_index, average='macro').to("cpu")  # Mean Dice
+    confusion_matrix = MulticlassConfusionMatrix(num_classes=num_classes, ignore_index=ignore_index, normalize='true').to("cpu")
 
     # --------------------------- LOGGING -------------------------------------
     train_loss_list, val_loss_list = [], []
@@ -224,6 +237,9 @@ def train_one_epoch(
         model.train()
         running_loss = 0.0
         train_loader_tqdm = tqdm(train_loader)
+        
+        # Per-class pixel counters for training
+        train_class_counts = torch.zeros(num_classes, dtype=torch.long)
 
         # ============================ TRAIN ==================================
         for images, labels in train_loader_tqdm:
@@ -249,7 +265,12 @@ def train_one_epoch(
 
             # Update accuracy (using predictions on CPU)
             preds = logits.argmax(dim=1).detach().cpu()
-            accuracy.update(preds, labels.detach().cpu())
+            labels_cpu = labels.detach().cpu()
+            accuracy.update(preds, labels_cpu)
+            
+            # Count pixels per class for support
+            for c in range(num_classes):
+                train_class_counts[c] += ((labels_cpu == c) & (labels_cpu != ignore_index)).sum()
 
             train_loader_tqdm.set_postfix({
                 "Training Loss": f"{running_loss:.4f}",
@@ -258,7 +279,10 @@ def train_one_epoch(
 
         # Store epoch-level training stats
         train_accuracy = accuracy.compute().item()
-        train_accuracies_list.append(train_accuracy)
+        train_accuracies_list.append({
+            'accuracy': train_accuracy,
+            'class_support': train_class_counts.tolist()
+        })
         train_loss_list.append(running_loss)
         accuracy.reset()
 
@@ -266,6 +290,10 @@ def train_one_epoch(
         model.eval()
         val_running = 0.0
         focal_loss_run, dice_loss_run = 0.0, 0.0
+        
+        # Per-class pixel counters for validation
+        val_class_counts = torch.zeros(num_classes, dtype=torch.long)
+        
         with torch.no_grad():
             for images, labels in val_loader:
                 images = images.to(device=device)
@@ -282,12 +310,64 @@ def train_one_epoch(
                 focal_loss_run += focal_loss.item() / len(val_loader)
 
                 preds = logits.argmax(dim=1).detach().cpu()
-                accuracy.update(preds, labels.detach().cpu())
+                labels_cpu = labels.detach().cpu()
+                
+                # Update all metrics
+                accuracy.update(preds, labels_cpu)
+                iou_metric.update(preds, labels_cpu)
+                miou_metric.update(preds, labels_cpu)
+                precision_metric.update(preds, labels_cpu)
+                recall_metric.update(preds, labels_cpu)
+                f1_metric.update(preds, labels_cpu)
+                mean_f1_metric.update(preds, labels_cpu)
+                confusion_matrix.update(preds, labels_cpu)
+                
+                # Count pixels per class for support
+                for c in range(num_classes):
+                    val_class_counts[c] += ((labels_cpu == c) & (labels_cpu != ignore_index)).sum()
 
+        # Compute all validation metrics
         val_accuracy = accuracy.compute().item()
-        val_loss_list.append((val_running, dice_loss_run, focal_loss_run))
-        val_accuracies_list.append(val_accuracy)
+        per_class_iou = iou_metric.compute().tolist()
+        mean_iou = miou_metric.compute().item()
+        per_class_precision = precision_metric.compute().tolist()
+        per_class_recall = recall_metric.compute().tolist()
+        per_class_dice = f1_metric.compute().tolist()  # F1 = Dice
+        overall_dice = mean_f1_metric.compute().item()  # Mean F1 = Mean Dice
+        conf_matrix = confusion_matrix.compute().tolist()
+        
+        # Compute mean class accuracy from per-class recall
+        mean_class_acc = torch.tensor(per_class_recall).mean().item()
+        
+        # Store comprehensive validation metrics
+        val_loss_list.append({
+            'total_loss': val_running,
+            'dice_loss': dice_loss_run,
+            'focal_loss': focal_loss_run
+        })
+        
+        val_accuracies_list.append({
+            'overall_accuracy': val_accuracy,
+            'mean_iou': mean_iou,
+            'per_class_iou': per_class_iou,
+            'mean_class_accuracy': mean_class_acc,
+            'overall_dice': overall_dice,
+            'per_class_dice': per_class_dice,
+            'per_class_precision': per_class_precision,
+            'per_class_recall': per_class_recall,
+            'confusion_matrix': conf_matrix,
+            'class_support': val_class_counts.tolist()
+        })
+        
+        # Reset all metrics
         accuracy.reset()
+        iou_metric.reset()
+        miou_metric.reset()
+        precision_metric.reset()
+        recall_metric.reset()
+        f1_metric.reset()
+        mean_f1_metric.reset()
+        confusion_matrix.reset()
 
         # ---------------------------- LOGGING --------------------------------
         print(f'''epoch [{epoch + 1}/{epochs}]
@@ -297,6 +377,9 @@ def train_one_epoch(
         \t Validation focal loss: {focal_loss_run:.4f}
         \t Train Accuracy: {train_accuracy:.4f},
         \t Val Accuracy: {val_accuracy:.4f}
+        \t Val mIoU: {mean_iou:.4f}
+        \t Val mAcc: {mean_class_acc:.4f}
+        \t Val Overall Dice: {overall_dice:.4f}
         ''')
 
     # --------------------------- RETURN --------------------------------------

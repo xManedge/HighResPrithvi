@@ -8,3 +8,6 @@ prithvi_venv/
 Dataset/
 outputs/
 .idea/
+dataset_gen_output/
+*.pt
+reconstructed_tiles/
