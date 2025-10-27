@@ -448,19 +448,16 @@ def main():
 
     # Image paths for all 5 cities
     image_paths = [
-        "./Dataset/HLS-2/Orlando/HLS.S30.T17RMM.2024098T155819.v2.0.B02.tif",
-        "./Dataset/HLS-2/Seattle/HLS.S30.T10TET.2025159T190909.v2.0.B02.tif",
-        "./Dataset/HLS-2/Los Angeles/HLS.S30.T11SLT.2024128T182921.v2.0.B02.tif",
-        "./Dataset/HLS-2/Chicago/HLS.S30.T16TDM.2025261T164701.v2.0.B02.tif",
+        "Dataset/HLS-2/New York City/HLS.S30.T18TWL.2024240T154931.v2.0.B02.tif"
     ]
     
     # Single label file for all cities
-    label_path = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
+    label_path = "Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
 
     # Extract city names from paths
     city_names = []
     for path in image_paths:
-        city_name = path.split('/')[3]  # Gets "Orlando", "Seattle", etc.
+        city_name = path.split('/')[2]  # Gets "Orlando", "Seattle", etc.
         city_names.append(city_name)
 
     batch_size = 8
@@ -511,6 +508,7 @@ def main():
         print("Trained weights loaded successfully!")
     except FileNotFoundError as e:
         print(f"Model weights not found at {model_weights_path}")
+        return
         
     
     model = model.to(device)
