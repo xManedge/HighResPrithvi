@@ -58,7 +58,7 @@ def train_model(model, image_paths, label_path, device, batch_size,
         - 1: temporal dimension (single time slice)
         - 224x224: spatial tile size
     """
-    print(summary(model, input_size=(6, 1, 224, 224)))
+
 
     """
     ===========================================================================
@@ -185,15 +185,15 @@ image_paths = [
 label_paths = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
 
 # ==== Training parameters ====
-batch_size = 8
+batch_size = 12
 device = 'auto'
-epochs = 10
-lr = 1e-4
+epochs = 20
+lr = 2e-5
 ignore_index = 255
-dice_weight = 0.5
-focal_weight = 1.0
-focal_gamma = 2.0
-class_weights = None
+dice_weight = 0.6
+focal_weight = 0.4
+focal_gamma = 1.6
+class_weights = torch.tensor([0.10, 0.20, 0.40, 0.30])
 verbose = False
 # ==== Dataset parameters ====
 tile_size = 224
@@ -273,8 +273,8 @@ Different versions correspond to different model sizes and token lengths.
 
 The pretrained model serves as a frozen encoder backbone.
 """
-# pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_300_tl", pretrained=True)  # 300M ViT-Large
-pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_100_tl", pretrained=True)  # 100M ViT-Small
+pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_300_tl", pretrained=True)  # 300M ViT-Large
+#pretrained_model = BACKBONE_REGISTRY.build("prithvi_eo_v2_100_tl", pretrained=True)  # 100M ViT-Small
 
 """
 ---------------------------------------------------------------------------
@@ -288,15 +288,16 @@ The Prithvi_EO wrapper adds:
 model = Prithvi_EO(
     pretrained_model=pretrained_model,
     num_classes=4,
-    fpn_blocks=[3, 6, 9, 12],  # Transformer layers used for skip features
+    fpn_blocks=[6, 12, 18, 24],  # Transformer layers used for skip features
     scale_factors=[1, 2, 3, 6],  # Pooling scales
-    embed_dim=768,  # Embedding size (ViT-Small)
+    embed_dim=1024,  # Embedding size (ViT-Small)
     out_channels_feature_map=256,
     FPN_out_channels=256,
     upsampling_scale_list=[4, 2, 1, 0.5],
     u_height=56,
     u_width=56,
 )
+
 
 """
 ==============================================================================

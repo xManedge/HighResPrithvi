@@ -260,6 +260,7 @@ class HLSDataset(Dataset):
                 bands.append(band_data)
 
         stacked = np.stack(bands)
+        stacked = stacked / 10000.0
 
         return stacked
 
@@ -434,3 +435,165 @@ class HLSDataset(Dataset):
         plt.show()
 
         return fig
+'''
+
+import os
+from pathlib import Path
+
+def plot_overlay_and_save(dataset, idx, city_name, output_dir='./dataset_gen_output'):
+    """
+    Create and save an overlay plot of the satellite image and label.
+    
+    Args:
+        dataset: HLSDataset instance
+        idx: Index of the patch to visualize
+        city_name: Name of the city for filename
+        output_dir: Directory to save the output
+    """
+    # Create output directory if it doesn't exist
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # Get image and label
+    img, lbl = dataset[idx]
+    
+    img_np = img.numpy()
+    lbl_np = lbl.numpy()
+    
+    # True color composite (B04-R, B03-G, B02-B)
+    rgb = np.stack([
+        img_np[2],  # Red
+        img_np[1],  # Green
+        img_np[0],  # Blue
+    ], axis=-1)
+    
+    # Normalize brightness using 2–98 percentile stretch
+    rgb_norm = np.zeros_like(rgb)
+    for i in range(3):
+        p2, p98 = np.percentile(rgb[:, :, i], (2, 98))
+        rgb_norm[:, :, i] = np.clip((rgb[:, :, i] - p2) / (p98 - p2), 0, 1)
+    
+    # Create figure with 3 subplots
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # Plot RGB image
+    axes[0].imshow(rgb_norm)
+    axes[0].set_title(f'RGB Image - {city_name} (Patch {idx})')
+    axes[0].axis('off')
+    
+    # Plot labels
+    colors = ['blue', 'darkgreen', 'red', '#39FF14', 'white']
+    cmap = ListedColormap(colors)
+    lbl_masked = np.ma.masked_equal(lbl_np, 255)
+    
+    im = axes[1].imshow(lbl_masked, cmap=cmap, vmin=0, vmax=4, interpolation='nearest')
+    axes[1].set_title('Labels')
+    axes[1].axis('off')
+    
+    cbar = plt.colorbar(im, ax=axes[1], ticks=[0, 1, 2, 3])
+    cbar.ax.set_yticklabels(['Water', 'Trees', 'Built-up', 'Grassland'])
+    
+    # Plot overlay
+    axes[2].imshow(rgb_norm)
+    axes[2].imshow(lbl_masked, cmap=cmap, vmin=0, vmax=4, alpha=0.5, interpolation='nearest')
+    axes[2].set_title('Overlay')
+    axes[2].axis('off')
+    
+    plt.tight_layout()
+    
+    # Save figure
+    output_path = os.path.join(output_dir, f'{city_name}_{idx}.jpeg')
+    plt.savefig(output_path, format='jpeg', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    
+    print(f"Saved: {output_path}")
+    
+    # Print statistics
+    unique, counts = np.unique(lbl_np, return_counts=True)
+    print(f"Patch {idx} statistics for {city_name}:")
+    print(f"  Image shape: {img_np.shape}")
+    print(f"  Label shape: {lbl_np.shape}")
+    class_names = {0: 'Water', 1: 'Trees', 2: 'Built-up', 3: 'Grassland', 255: 'Ignore'}
+    for val, count in zip(unique, counts):
+        pct = count / lbl_np.size * 100
+        print(f"  {class_names.get(val, val)}: {count} pixels ({pct:.1f}%)")
+    print()
+
+
+def main():
+    """
+    Main function to test HLSDataset with multiple cities and save overlay plots.
+    """
+    # Define image paths for different cities
+    image_paths = [
+        "../Dataset/HLS-2/Chicago/HLS.S30.T16TDM.2025261T164701.v2.0.B02.tif",
+        "../Dataset/HLS-2/Seattle/HLS.S30.T10TET.2025159T190909.v2.0.B02.tif",
+        "../Dataset/HLS-2/Los Angeles/HLS.S30.T11SLT.2024128T182921.v2.0.B02.tif",
+        "../Dataset/HLS-2/Chicago/HLS.S30.T16TDM.2025261T164701.v2.0.B02.tif",
+    ]
+    
+    # City names corresponding to each path
+    city_names = ['Orlando', 'Seattle', 'Los_Angeles', 'Chicago']
+    
+    # Label path (same for all regions)
+    label_path = "../Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
+    
+    # Output directory
+    output_dir = '../dataset_gen_output'
+    
+    # Test parameters
+    tile_size = 224
+    stride = 224
+    num_samples_per_city = 3  # Number of patches to visualize per city
+    
+    print("=" * 80)
+    print("Testing HLSDataset with multiple cities")
+    print("=" * 80)
+    
+    # Process each city
+    for image_path, city_name in zip(image_paths, city_names):
+        print(f"\n{'=' * 80}")
+        print(f"Processing: {city_name}")
+        print(f"{'=' * 80}\n")
+        
+        # Check if image file exists
+        if not os.path.exists(image_path):
+            print(f"WARNING: Image file not found: {image_path}")
+            print(f"Skipping {city_name}...\n")
+            continue
+        
+        # Initialize dataset
+        try:
+            dataset = HLSDataset(
+                image_loc=image_path,
+                label_loc=label_path,
+                tile=tile_size,
+                stride=stride,
+                verbose=True
+            )
+            
+            print(f"\nDataset initialized successfully!")
+            print(f"Total patches available: {len(dataset)}")
+            
+            # Determine how many samples to process
+            num_samples = min(num_samples_per_city, len(dataset))
+            
+            # Generate and save overlay plots
+            for i in range(num_samples):
+                print(f"\n--- Processing patch {i} ---")
+                plot_overlay_and_save(dataset, i, city_name, output_dir)
+            
+            print(f"\nCompleted processing {num_samples} patches for {city_name}")
+            
+        except Exception as e:
+            print(f"ERROR processing {city_name}: {str(e)}")
+            print(f"Skipping to next city...\n")
+            continue
+    
+    print(f"\n{'=' * 80}")
+    print(f"All processing complete! Output saved to: {output_dir}")
+    print(f"{'=' * 80}")
+
+
+if __name__ == "__main__":
+    main()
+'''
