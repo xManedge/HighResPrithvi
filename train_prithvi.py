@@ -188,12 +188,12 @@ label_paths = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov
 batch_size = 12
 device = 'auto'
 epochs = 20
-lr = 5e-5
+lr = 2e-5
 ignore_index = 255
-dice_weight = 0.4
-focal_weight = 0.6
-focal_gamma = 2.0
-class_weights = torch.tensor([0.1412, 0.2029, 0.2819, 0.3740])
+dice_weight = 0.6
+focal_weight = 0.4
+focal_gamma = 1.6
+class_weights = torch.tensor([0.10, 0.20, 0.40, 0.30])
 verbose = False
 # ==== Dataset parameters ====
 tile_size = 224

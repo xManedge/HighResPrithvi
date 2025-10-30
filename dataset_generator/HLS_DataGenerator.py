@@ -260,6 +260,7 @@ class HLSDataset(Dataset):
                 bands.append(band_data)
 
         stacked = np.stack(bands)
+        stacked = stacked / 10000.0
 
         return stacked
 
