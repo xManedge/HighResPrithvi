@@ -256,30 +256,36 @@ def predict_with_reconstruction_and_metrics(model, image_link, device=None, batc
                                             model_name='prithvi', output_dir='reconstructed_tiles',
                                             labels_path=None, class_names=None):
     """
-    Predict on patches, track metrics, and reconstruct full tile as GeoTIFF.
+    Predict on patches, track metrics (if labels provided), and reconstruct full tile as GeoTIFF.
+    
+    MODIFIED: Now works with or without labels.
     """
     n_classes = 4
     if not device:
         device = torch.device('cpu')
 
-    # Initialize metrics tracker
-    if class_names is None:
-        class_names = ['water', 'trees', 'buildings', 'crops']
-
-    metrics_tracker = SegmentationMetricsTracker(n_classes=n_classes,
-                                                 class_names=class_names,
-                                                 ignore_index=255)
-
-    # CRITICAL: Must use deterministic mode for reconstruction
+    # Initialize metrics tracker only if we have labels
     has_labels = labels_path is not None
-    test_set = HLSDataset(image_link, labels_path, tile=224, stride=224, ignore_index=255)
+    
+    if has_labels:
+        if class_names is None:
+            class_names = ['water', 'trees', 'buildings', 'crops']
+        metrics_tracker = SegmentationMetricsTracker(n_classes=n_classes,
+                                                     class_names=class_names,
+                                                     ignore_index=255)
+        print(f'Processing WITH labels (metrics will be calculated)')
+    else:
+        metrics_tracker = None
+        print(f'Processing WITHOUT labels (inference only)')
 
+    # Create dataset - works with or without labels now
+    test_set = HLSDataset(image_link, labels_path, tile=224, stride=224, ignore_index=255)
     test_loader = DataLoader(test_set, shuffle=False, batch_size=batch_size)
 
     model = model.to(device)
     model.eval()
 
-    print(f'Processing with metrics tracking: {model_name}')
+    print(f'Running inference: {model_name}')
 
     # Dictionary to store predictions: {patch_index: prediction_array}
     patch_predictions = {}
@@ -287,20 +293,22 @@ def predict_with_reconstruction_and_metrics(model, image_link, device=None, batc
 
     with torch.inference_mode():
         for batch_data in test_loader:
+            # Handle both cases: with and without labels
             if has_labels:
                 image, label = batch_data
-                image = image.to(device)
                 label = label.to(device)
             else:
-                image = batch_data.to(device)
+                image = batch_data
                 label = None
+            
+            image = image.to(device)
 
             # Get predictions
             logits = model(image)  # B C H W
             preds = logits.argmax(dim=1)  # B H W
 
             # Update metrics if we have labels
-            if has_labels:
+            if has_labels and metrics_tracker is not None:
                 # Get patch information for detailed tracking
                 batch_patch_info = []
                 for i in range(image.size(0)):
@@ -338,32 +346,35 @@ def predict_with_reconstruction_and_metrics(model, image_link, device=None, batc
     )
 
     # Save comprehensive metrics if we have labels
-    if has_labels:
+    if has_labels and metrics_tracker is not None:
         results_dir = metrics_tracker.save_results(output_dir, model_name)
         print(f"Metrics and analysis saved to: {results_dir}")
         return reconstructed_tile, metrics_tracker
     else:
-        print("No labels provided - skipping metrics calculation")
+        print("Inference complete - no metrics calculated")
         return reconstructed_tile, None
 
 
 def reconstruct_and_save_geotiff(patch_predictions, dataset, model_name, output_dir):
     """
     Reconstruct full tile from patches and save as GeoTIFF with proper georeferencing.
+    
+    MODIFIED: Uses inference_mode attribute to handle both training and inference datasets.
     """
 
-    # Extract spatial information from dataset (adapted for HLS)
-    if hasattr(dataset, 'hls_shape'):
-        full_height, full_width = dataset.hls_shape
-        transform = dataset.hls_transform
+    # Extract spatial information from dataset (adapted for both modes)
+    if hasattr(dataset, 'inference_mode') and dataset.inference_mode:
+        # Inference mode - use full HLS extent
+        full_height, full_width = dataset.aligned_height, dataset.aligned_width
+        transform = dataset.aligned_transform
         crs = dataset.hls_crs
     elif hasattr(dataset, 'aligned_height'):
-        # Alternative naming convention
+        # Training mode - use aligned grid
         full_height, full_width = dataset.aligned_height, dataset.aligned_width
         transform = dataset.aligned_transform
         crs = dataset.hls_crs
     else:
-        raise ValueError("Dataset doesn't have required spatial metadata (hls_shape, hls_transform, hls_crs)")
+        raise ValueError("Dataset doesn't have required spatial metadata")
 
     print(f"Reconstructing {full_width}x{full_height} pixel tile")
 
@@ -406,6 +417,8 @@ def save_georeferenced_geotiff(array, output_path, transform, crs,
                                nodata_value=255, compress='lzw'):
     """
     Save numpy array as georeferenced GeoTIFF.
+    
+    NO CHANGES - This function works as-is for both modes.
     """
 
     height, width = array.shape
@@ -444,20 +457,33 @@ def save_georeferenced_geotiff(array, output_path, transform, crs,
 def main():
     """
     Main function for multi-city Prithvi model inference with comprehensive metrics tracking.
+    
+    MODIFIED: Set labels_path=None for inference-only mode.
     """
 
     # Image paths for all 5 cities
-    image_paths = [
-        "Dataset/HLS-2/New York City/HLS.S30.T18TWL.2024240T154931.v2.0.B02.tif"
+    '''image_paths = [
+        "./Dataset/HLS-2/New York City/HLS.S30.T18TWL.2024240T154931.v2.0.B02.tif",
+        "./Dataset/HLS-2/Los Angeles/HLS.S30.T11SLT.2024128T182921.v2.0.B02.tif",
+        "./Dataset/HLS-2/Chicago/HLS.S30.T16TDM.2025261T164701.v2.0.B02.tif",
+        "./Dataset/HLS-2/Orlando/HLS.S30.T17RMM.2024098T155819.v2.0.B02.tif",
+        "./Dataset/HLS-2/Seattle/HLS.S30.T10TET.2025159T190909.v2.0.B02.tif"
     ]
+    '''
+    image_paths = ["./Dataset/HLS-2/Bangalore/HLS.S30.T43PGQ.2025132T050711.v2.0.B02.tif",
+                  "./Dataset/HLS-2/Mumbai/HLS.S30.T43QBB.2025296T053809.v2.0.B02.tif",
+                  ]
+    
     
     # Single label file for all cities
-    label_path = "Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
+    # SET TO None FOR INFERENCE-ONLY MODE (no metrics)
+    # label_path = "./Dataset/NLCD/Annual_NLCD_LndCov_2024_CU_C1V1/Annual_NLCD_LndCov_2024_CU_C1V1.tif"
+    label_path = None  
 
     # Extract city names from paths
     city_names = []
     for path in image_paths:
-        city_name = path.split('/')[2]  # Gets "Orlando", "Seattle", etc.
+        city_name = path.split('/')[3]  # Gets "Orlando", "Seattle", etc.
         city_names.append(city_name)
 
     batch_size = 8
@@ -475,6 +501,7 @@ def main():
     print(f"{'=' * 70}")
     print(f"Device: {device}")
     print(f"Cities to process: {len(image_paths)}")
+    print(f"Mode: {'WITH LABELS (metrics enabled)' if label_path else 'INFERENCE ONLY (no metrics)'}")
     print(f"{'=' * 70}\n")
 
     """
@@ -540,10 +567,11 @@ def main():
                 batch_size=batch_size,
                 model_name=model_name,
                 output_dir=city_output_dir,
-                labels_path=label_path,
+                labels_path=label_path,  # Can be None for inference-only
                 class_names=class_names
             )
 
+            # Only process metrics if we have them
             if metrics_tracker is not None:
                 report = metrics_tracker.get_classification_report()
                 if report:
@@ -567,17 +595,21 @@ def main():
                             city_result[f'{class_name}_f1'] = report[class_name]['f1-score']
                     
                     all_city_results.append(city_result)
+            else:
+                print(f"\n{city_name} - Inference complete (no metrics)")
                     
             print(f"{city_name} processing complete!")
             print(f"  Results saved to: {city_output_dir}")
             
         except Exception as e:
             print(f"ERROR processing {city_name}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             continue
 
     """
     ==============================================================================
-    SAVE AGGREGATED RESULTS
+    SAVE AGGREGATED RESULTS (only if we have metrics)
     ==============================================================================
     """
     if all_city_results:
@@ -606,6 +638,11 @@ def main():
         
         print(f"\n{'=' * 70}")
         print("ALL CITIES PROCESSED SUCCESSFULLY!")
+        print(f"{'=' * 70}\n")
+    else:
+        print(f"\n{'=' * 70}")
+        print("INFERENCE COMPLETE - NO METRICS CALCULATED")
+        print(f"All GeoTIFF predictions saved to: {base_output_dir}")
         print(f"{'=' * 70}\n")
 
 
